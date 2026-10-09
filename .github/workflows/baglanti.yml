@@ -1,0 +1,24 @@
+name: Bağlantı testi
+
+# Yalnızca okur, hiçbir şey paylaşmaz: token'ın hangi hesabı gördüğünü gösterir.
+on:
+  workflow_dispatch:
+
+jobs:
+  baglanti:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Bağlantı
+        env:
+          BACKEND: ${{ vars.BACKEND }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+        run: python bot.py baglanti
