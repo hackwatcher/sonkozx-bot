@@ -1,0 +1,27 @@
+name: Instagram token yenile
+
+# Instagram token'ı 60 günde biter; haftada bir yenilenir. Instagram yeni bir token verirse
+# IG_ACCESS_TOKEN secret'ını güncellemek için GH_PAT gerekir (çoğu zaman aynı token döner).
+on:
+  schedule:
+    - cron: "0 3 * * 1"   # her pazartesi 06:00 TR
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Yenile
+        env:
+          BACKEND: ${{ vars.BACKEND }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: python bot.py refresh-token

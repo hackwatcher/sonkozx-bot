@@ -1,0 +1,65 @@
+name: Günlük story
+
+# Her gün 13:00 TR. Tür güne göre değişir:
+# Pzt görev, Salı tokat, Çar ipucu, Per tokat, Cum ipucu, Cmt "bu akşam", Paz haftalık özet.
+on:
+  schedule:
+    - cron: "0 10 * * *"   # 13:00 TR
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "Türü zorla (boş = güne göre)"
+        type: choice
+        options: ["", "gorev", "tokat", "ipucu", "aksam", "ozet"]
+        default: ""
+      dry_run:
+        description: "Sadece dene (yayınlama)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: instagram-post   # karusel işiyle aynı anda çalışmasın
+  cancel-in-progress: false
+
+jobs:
+  story:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Story
+        env:
+          BACKEND: ${{ vars.BACKEND }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MEDIA_REPO: ${{ vars.MEDIA_REPO }}
+          MEDIA_TOKEN: ${{ secrets.MEDIA_TOKEN }}
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+          META_AD_ACCOUNT: ${{ vars.META_AD_ACCOUNT }}
+          KIND: ${{ inputs.kind }}
+          DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          ARGS=""
+          [ -n "$KIND" ] && ARGS="$ARGS --kind $KIND"
+          [ "$DRY" = "true" ] && ARGS="$ARGS --dry-run"
+          python bot.py story $ARGS
+
+      - name: Sayaçları kaydet
+        if: ${{ github.event_name == 'schedule' || !inputs.dry_run }}
+        run: |
+          git config user.name "sonkoz-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Story sayaçları güncellendi"
+          git pull --rebase
+          git push
