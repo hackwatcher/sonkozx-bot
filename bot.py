@@ -7,8 +7,10 @@
                           hesabının görsel kütüphanesinden yayınlanır.
 
 Komutlar:
-  python bot.py post [--dry-run] [--id N]     sıradaki karuseli (ve "yeni karusel" story'sini) yayınla
-  python bot.py story [--dry-run] [--kind K]  günün story'sini yayınla
+  python bot.py post [--dry-run|--dene] [--id N]     sıradaki karuseli (ve "yeni karusel" story'sini) yayınla
+  python bot.py story [--dry-run|--dene] [--kind K]  günün story'sini yayınla
+    --dry-run  yalnızca çizer, Instagram'a bağlanmaz
+    --dene     her şeyi yapar (yükleme, izin kontrolü, Instagram'ın işlemesi) ama YAYINLAMAZ, sırayı ilerletmez
   python bot.py baglanti                      token'ın hangi hesabı gördüğüne bak (yalnızca okur)
   python bot.py refresh-token                 Instagram token'ını yenile (instagram yöntemi)
   python bot.py status                        kaç gönderi kaldığını göster
@@ -138,7 +140,7 @@ class Graph:
     def publish(self, container_id):
         return self.call("POST", f"{self.ig}/media_publish", creation_id=container_id)["id"]
 
-    def publish_carousel(self, paths, caption, folder):
+    def publish_carousel(self, paths, caption, folder, publish=True):
         children = [self.call("POST", f"{self.ig}/media", is_carousel_item="true", image_url=u)["id"]
                     for u in self.urls(paths, folder)]
         for c in children:
@@ -146,13 +148,13 @@ class Graph:
         carousel = self.call("POST", f"{self.ig}/media", media_type="CAROUSEL",
                              children=",".join(children), caption=caption)["id"]
         self.wait(carousel)
-        return self.publish(carousel)
+        return self.publish(carousel) if publish else carousel
 
-    def publish_story(self, path, folder):
+    def publish_story(self, path, folder, publish=True):
         url = self.urls([path], folder)[0]
         cid = self.call("POST", f"{self.ig}/media", media_type="STORIES", image_url=url)["id"]
         self.wait(cid)
-        return self.publish(cid)
+        return self.publish(cid) if publish else cid
 
 
 # ---------- yöntem 1: Instagram ile giriş ----------
@@ -308,6 +310,13 @@ def cmd_post(args):
     tmp = tempfile.mkdtemp()
     try:
         paths = render_carousel(post, DEFAULT_PALETTE, tmp, ext="jpg")
+        if args.dene:  # her adım gerçek, sadece son "yayınla" çağrısı yok
+            cid = api.publish_carousel(paths, caption, f"dene-{post_id:04d}", publish=False)
+            print(f"[dene] #{post_id} karuseli Instagram'da hazır, YAYINLANMADI (kapsayıcı {cid})")
+            sid = api.publish_story(render_story("yeni", story_data, os.path.join(tmp, "story.jpg")),
+                                    f"dene-{post_id:04d}-story", publish=False)
+            print(f"[dene] 'yeni karusel' story'si hazır, YAYINLANMADI (kapsayıcı {sid})")
+            return 0
         media_id = api.publish_carousel(paths, caption, f"{post_id:04d}")
         print(f"Yayınlandı: #{post_id} (media id {media_id})")
         if STORIES_ENABLED:
@@ -367,8 +376,11 @@ def cmd_story(args):
     api = client()
     tmp = tempfile.mkdtemp()
     try:
-        api.publish_story(render_story(kind, data, os.path.join(tmp, "story.jpg")),
-                          f"story-{dt.datetime.now(TR):%Y%m%d-%H%M}")
+        cid = api.publish_story(render_story(kind, data, os.path.join(tmp, "story.jpg")),
+                                f"story-{dt.datetime.now(TR):%Y%m%d-%H%M}", publish=not args.dene)
+        if args.dene:
+            print(f"[dene] story ({kind}) hazır, YAYINLANMADI (kapsayıcı {cid})")
+            return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -417,9 +429,11 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("post")
     p.add_argument("--dry-run", action="store_true", help="yayınlamadan sadece çiz")
+    p.add_argument("--dene", action="store_true", help="her şeyi yap ama yayınlama")
     p.add_argument("--id", type=int, help="belirli bir gönderiyi yayınla (sıra ilerlemez)")
     st = sub.add_parser("story")
     st.add_argument("--dry-run", action="store_true", help="yayınlamadan sadece çiz")
+    st.add_argument("--dene", action="store_true", help="her şeyi yap ama yayınlama")
     st.add_argument("--kind", choices=["gorev", "tokat", "ipucu", "aksam", "ozet"], help="türü zorla")
     sub.add_parser("baglanti")
     sub.add_parser("refresh-token")

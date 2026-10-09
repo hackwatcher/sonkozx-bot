@@ -1,0 +1,42 @@
+name: Tam test (yayınlamaz)
+
+# Gerçek akışın tamamı: çizim, görselleri yükleme, Instagram'ın indirip işlemesi, paylaşım izni kontrolü.
+# Sadece son "yayınla" adımı yapılmaz; hazırlanan kapsayıcılar 24 saatte kendiliğinden silinir.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: instagram-post
+  cancel-in-progress: false
+
+jobs:
+  dene:
+    runs-on: ubuntu-latest
+    env:
+      BACKEND: ${{ vars.BACKEND }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MEDIA_REPO: ${{ vars.MEDIA_REPO }}
+      MEDIA_TOKEN: ${{ secrets.MEDIA_TOKEN }}
+      META_TOKEN: ${{ secrets.META_TOKEN }}
+      META_AD_ACCOUNT: ${{ vars.META_AD_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Bağlantı
+        run: python bot.py baglanti
+
+      - name: Karusel + yeni karusel story'si
+        run: python bot.py post --dene
+
+      - name: Günlük story
+        run: python bot.py story --dene --kind ipucu
