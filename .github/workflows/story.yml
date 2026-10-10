@@ -34,7 +34,11 @@ jobs:
   story:
     runs-on: ubuntu-latest
     steps:
+      # Sıradaki çalışma beklerken önceki paylaşım state.json'u güncellemiş olabilir;
+      # tetiklendiği andaki eski hâli değil, main'in en son hâlini al.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-python@v5
         with:

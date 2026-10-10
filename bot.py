@@ -143,17 +143,38 @@ class Graph:
     def urls(self, paths, folder):
         raise NotImplementedError
 
-    def publish(self, container_id, tries=4):
+    def recent(self, edge, since):
+        """Hesapta `since`'ten sonra çıkmış bir gönderi/story varsa id'sini döndürür."""
+        try:
+            items = self.call("GET", f"{self.ig}/{edge}", fields="id,timestamp", limit="5").get("data", [])
+        except RuntimeError:
+            return None
+        for m in items:
+            ts = m.get("timestamp")
+            if ts and dt.datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S%z") >= since:
+                return m["id"]
+        return None
+
+    def publish(self, container_id, edge="media", tries=4):
         # Instagram, işlenmiş kapsayıcı için bile (özellikle başka bir yayının hemen ardından)
         # geçici olarak "Media Not Found" (2207006) dönebiliyor; biraz bekleyip yeniden dene.
+        # Hata dönse bile yayın bazen gerçekleşiyor: her denemeden önce hesaba bakılır ki
+        # aynı gönderi iki kez çıkmasın.
+        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=30)
         for i in range(tries):
             try:
                 return self.call("POST", f"{self.ig}/media_publish", creation_id=container_id)["id"]
             except RuntimeError as e:
-                if i == tries - 1 or not any(k in str(e) for k in ("2207006", "2207027", "kod 2/", "kod 1/")):
+                transient = any(k in str(e) for k in ("2207006", "2207027", "kod 2/", "kod 1/"))
+                if i < tries - 1 and transient:
+                    print(f"Yayın denemesi {i + 1} başarısız: {e}")
+                    time.sleep(15 * (i + 1))
+                found = self.recent(edge, since)
+                if found:
+                    print(f"Hata dönmesine rağmen yayın gerçekleşmiş (id {found}), tekrar denenmiyor.")
+                    return found
+                if i == tries - 1 or not transient:
                     raise
-                print(f"Yayın denemesi {i + 1} başarısız, yeniden deneniyor: {e}")
-                time.sleep(15 * (i + 1))
 
     def publish_carousel(self, paths, caption, folder, publish=True):
         children = [self.call("POST", f"{self.ig}/media", is_carousel_item="true", image_url=u)["id"]
@@ -169,7 +190,7 @@ class Graph:
         url = self.urls([path], folder)[0]
         cid = self.call("POST", f"{self.ig}/media", media_type="STORIES", image_url=url)["id"]
         self.wait(cid)
-        return self.publish(cid) if publish else cid
+        return self.publish(cid, edge="stories") if publish else cid
 
 
 # ---------- yöntem 1: Instagram ile giriş ----------
@@ -308,6 +329,10 @@ def cmd_post(args):
     state = load_state()
     post_id = args.id or state["next_id"]
     if args.zamanli and not args.dry_run and not args.dene:
+        hour = dt.datetime.now(TR).hour
+        if not (8 <= hour < 11 or 20 <= hour < 23):
+            print(f"Saat {hour}:xx paylaşım penceresi dışında (08-11 / 20-23), gecikmiş tetikleme atlanıyor.")
+            return 0
         slot = slot_key()
         if any(slot_key(dt.datetime.fromisoformat(h["at"])) == slot for h in state["history"] if h.get("at")):
             print(f"Bu dilimde ({slot}) zaten paylaşıldı, yedek tetikleme atlanıyor.")
@@ -386,6 +411,9 @@ def cmd_story(args):
     posts = {p["id"]: p for p in load_all()}
     state = load_state()
     today = f"{dt.datetime.now(TR):%Y-%m-%d}"
+    if args.zamanli and not args.dry_run and not args.dene and not 13 <= dt.datetime.now(TR).hour < 16:
+        print("Story penceresi (13-16) dışında, gecikmiş tetikleme atlanıyor.")
+        return 0
     if args.zamanli and not args.dry_run and not args.dene and state.get("story_last") == today:
         print(f"Bugünün story'si ({today}) zaten paylaşıldı, yedek tetikleme atlanıyor.")
         return 0
