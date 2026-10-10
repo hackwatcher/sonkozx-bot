@@ -143,8 +143,17 @@ class Graph:
     def urls(self, paths, folder):
         raise NotImplementedError
 
-    def publish(self, container_id):
-        return self.call("POST", f"{self.ig}/media_publish", creation_id=container_id)["id"]
+    def publish(self, container_id, tries=4):
+        # Instagram, işlenmiş kapsayıcı için bile (özellikle başka bir yayının hemen ardından)
+        # geçici olarak "Media Not Found" (2207006) dönebiliyor; biraz bekleyip yeniden dene.
+        for i in range(tries):
+            try:
+                return self.call("POST", f"{self.ig}/media_publish", creation_id=container_id)["id"]
+            except RuntimeError as e:
+                if i == tries - 1 or not any(k in str(e) for k in ("2207006", "2207027", "kod 2/", "kod 1/")):
+                    raise
+                print(f"Yayın denemesi {i + 1} başarısız, yeniden deneniyor: {e}")
+                time.sleep(15 * (i + 1))
 
     def publish_carousel(self, paths, caption, folder, publish=True):
         children = [self.call("POST", f"{self.ig}/media", is_carousel_item="true", image_url=u)["id"]
