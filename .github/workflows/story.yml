@@ -18,6 +18,10 @@ on:
         description: "Sadece dene (yayınlama)"
         type: boolean
         default: true
+      zamanli:
+        description: "Bugün paylaşıldıysa atla (dış zamanlayıcı için)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -53,7 +57,7 @@ jobs:
           ARGS=""
           [ -n "$KIND" ] && ARGS="$ARGS --kind $KIND"
           [ "$DRY" = "true" ] && ARGS="$ARGS --dry-run"
-          [ "${{ github.event_name }}" = "schedule" ] && ARGS="$ARGS --zamanli"
+          [ "${{ github.event_name == 'schedule' || inputs.zamanli }}" = "true" ] && ARGS="$ARGS --zamanli"
           python bot.py story $ARGS
 
       - name: Sayaçları kaydet

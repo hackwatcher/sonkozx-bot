@@ -19,6 +19,10 @@ on:
         description: "Sadece dene (yayınlama)"
         type: boolean
         default: true
+      zamanli:
+        description: "Bu dilimde paylaşıldıysa atla (dış zamanlayıcı için)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -54,7 +58,7 @@ jobs:
           META_TOKEN: ${{ secrets.META_TOKEN }}
           META_AD_ACCOUNT: ${{ vars.META_AD_ACCOUNT }}
           STORIES: ${{ vars.STORIES }}
-        run: python bot.py post ${{ github.event_name == 'schedule' && '--zamanli' || '' }}
+        run: python bot.py post ${{ (github.event_name == 'schedule' || inputs.zamanli) && '--zamanli' || '' }}
 
       - name: Sırayı kaydet
         if: ${{ github.event_name == 'schedule' || !inputs.dry_run }}
