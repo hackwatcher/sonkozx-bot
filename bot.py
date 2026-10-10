@@ -411,8 +411,8 @@ def cmd_story(args):
     posts = {p["id"]: p for p in load_all()}
     state = load_state()
     today = f"{dt.datetime.now(TR):%Y-%m-%d}"
-    if args.zamanli and not args.dry_run and not args.dene and not 13 <= dt.datetime.now(TR).hour < 16:
-        print("Story penceresi (13-16) dışında, gecikmiş tetikleme atlanıyor.")
+    if args.zamanli and not args.dry_run and not args.dene and not 11 <= dt.datetime.now(TR).hour < 16:
+        print("Story penceresi (11-16) dışında, gecikmiş tetikleme atlanıyor.")
         return 0
     if args.zamanli and not args.dry_run and not args.dene and state.get("story_last") == today:
         print(f"Bugünün story'si ({today}) zaten paylaşıldı, yedek tetikleme atlanıyor.")
