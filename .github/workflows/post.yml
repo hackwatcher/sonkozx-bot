@@ -2,9 +2,17 @@ name: Instagram paylaşımı
 
 on:
   schedule:
-    # Türkiye saati = UTC+3. Günde 3 paylaşıma çıkmak için bir satır daha ekle.
-    - cron: "30 5 * * *"    # 08:30 TR
-    - cron: "30 17 * * *"   # 20:30 TR
+    # Türkiye saati = UTC+3. GitHub zamanlanmış işleri bazen geciktirir ya da hiç çalıştırmaz
+    # (10 Ekim sabahı 08:30 hiç tetiklenmedi). Bu yüzden her dilimin yedek saatleri var;
+    # dilimde paylaşım yapıldıysa yedekler kendiliğinden atlar (bot.py --zamanli).
+    - cron: "27 5 * * *"    # 08:27 TR
+    - cron: "52 5 * * *"    # yedek 08:52
+    - cron: "23 6 * * *"    # yedek 09:23
+    - cron: "11 7 * * *"    # yedek 10:11
+    - cron: "27 17 * * *"   # 20:27 TR
+    - cron: "52 17 * * *"   # yedek 20:52
+    - cron: "23 18 * * *"   # yedek 21:23
+    - cron: "11 19 * * *"   # yedek 22:11
   workflow_dispatch:
     inputs:
       dry_run:
@@ -46,7 +54,7 @@ jobs:
           META_TOKEN: ${{ secrets.META_TOKEN }}
           META_AD_ACCOUNT: ${{ vars.META_AD_ACCOUNT }}
           STORIES: ${{ vars.STORIES }}
-        run: python bot.py post
+        run: python bot.py post ${{ github.event_name == 'schedule' && '--zamanli' || '' }}
 
       - name: Sırayı kaydet
         if: ${{ github.event_name == 'schedule' || !inputs.dry_run }}

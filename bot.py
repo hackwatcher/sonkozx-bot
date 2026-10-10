@@ -86,6 +86,12 @@ def save_state(state):
         f.write("\n")
 
 
+def slot_key(when=None):
+    """Zamanlanmış işler için 'YYYY-AA-GG-sabah/aksam' (TR saati)."""
+    t = (when or dt.datetime.now(dt.timezone.utc)).astimezone(TR)
+    return f"{t:%Y-%m-%d}-{'sabah' if t.hour < 14 else 'aksam'}"
+
+
 # ---------- açıklama ----------
 
 def build_caption(post):
@@ -292,6 +298,11 @@ def cmd_post(args):
     posts = {p["id"]: p for p in load_all()}
     state = load_state()
     post_id = args.id or state["next_id"]
+    if args.zamanli and not args.dry_run and not args.dene:
+        slot = slot_key()
+        if any(slot_key(dt.datetime.fromisoformat(h["at"])) == slot for h in state["history"] if h.get("at")):
+            print(f"Bu dilimde ({slot}) zaten paylaşıldı, yedek tetikleme atlanıyor.")
+            return 0
     if post_id not in posts:
         print(f"Paylaşılacak gönderi kalmadı (sıradaki id: {post_id}). Yeni içerik ekle.")
         return 0
@@ -365,6 +376,10 @@ def daily_story_data(kind, state, posts):
 def cmd_story(args):
     posts = {p["id"]: p for p in load_all()}
     state = load_state()
+    today = f"{dt.datetime.now(TR):%Y-%m-%d}"
+    if args.zamanli and not args.dry_run and not args.dene and state.get("story_last") == today:
+        print(f"Bugünün story'si ({today}) zaten paylaşıldı, yedek tetikleme atlanıyor.")
+        return 0
     kind = args.kind or DAILY_STORY[dt.datetime.now(TR).weekday()]
     kind, data, counter = daily_story_data(kind, state, posts)
 
@@ -386,6 +401,7 @@ def cmd_story(args):
 
     if counter:
         state["story"][counter] += 1
+    state["story_last"] = today
     save_state(state)
     print(f"Story yayınlandı: {kind}")
     return 0
@@ -431,10 +447,12 @@ def main():
     p.add_argument("--dry-run", action="store_true", help="yayınlamadan sadece çiz")
     p.add_argument("--dene", action="store_true", help="her şeyi yap ama yayınlama")
     p.add_argument("--id", type=int, help="belirli bir gönderiyi yayınla (sıra ilerlemez)")
+    p.add_argument("--zamanli", action="store_true", help="bu dilimde paylaşıldıysa atla (yedek cron'lar için)")
     st = sub.add_parser("story")
     st.add_argument("--dry-run", action="store_true", help="yayınlamadan sadece çiz")
     st.add_argument("--dene", action="store_true", help="her şeyi yap ama yayınlama")
     st.add_argument("--kind", choices=["gorev", "tokat", "ipucu", "aksam", "ozet"], help="türü zorla")
+    st.add_argument("--zamanli", action="store_true", help="bugün paylaşıldıysa atla (yedek cron'lar için)")
     sub.add_parser("baglanti")
     sub.add_parser("refresh-token")
     sub.add_parser("status")

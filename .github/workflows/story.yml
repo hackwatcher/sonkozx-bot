@@ -4,7 +4,9 @@ name: Günlük story
 # Pzt görev, Salı tokat, Çar ipucu, Per tokat, Cum ipucu, Cmt "bu akşam", Paz haftalık özet.
 on:
   schedule:
-    - cron: "0 10 * * *"   # 13:00 TR
+    - cron: "3 10 * * *"    # 13:03 TR
+    - cron: "33 10 * * *"   # yedek 13:33 (bugün paylaşıldıysa atlar)
+    - cron: "17 11 * * *"   # yedek 14:17
   workflow_dispatch:
     inputs:
       kind:
@@ -51,6 +53,7 @@ jobs:
           ARGS=""
           [ -n "$KIND" ] && ARGS="$ARGS --kind $KIND"
           [ "$DRY" = "true" ] && ARGS="$ARGS --dry-run"
+          [ "${{ github.event_name }}" = "schedule" ] && ARGS="$ARGS --zamanli"
           python bot.py story $ARGS
 
       - name: Sayaçları kaydet
