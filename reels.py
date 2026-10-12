@@ -66,7 +66,7 @@ def _lines(d, text, font, max_w):
     return lines
 
 
-def _fit_lines(d, texts, max_h, start=168, minimum=84):
+def _fit_lines(d, texts, max_h, start=168, minimum=54):
     """Sahnedeki tüm metinler için ortak, sığan en büyük font."""
     size = start
     while True:
@@ -113,11 +113,12 @@ def build_scenes(post, pal):
     scenes = []
 
     def scene(texts, label=None, hold=1.0, first_at=0.0, extra=None, gap=LINE_GAP):
-        font, size, groups = _fit_lines(d, texts, BOTTOM - TOP - (160 if label else 0))
+        extra_h = 40 + 110 * len(extra) if extra else 0   # alttaki KAYDET / takip satırları
+        font, size, groups = _fit_lines(d, texts, BOTTOM - TOP - (160 if label else 0) - extra_h)
         rows = [line for g in groups for line in g]
         imgs = [_line_img(r, font, size, pal) for r in rows]
         block = len(rows) * size * 1.34
-        y = (TOP + BOTTOM) / 2 - block / 2 + (60 if label else 0)
+        y = (TOP + BOTTOM) / 2 - (block + extra_h) / 2 + (60 if label else 0)
         items = []
         for i, im in enumerate(imgs):
             items.append({"img": im, "xy": (MARGIN - int(size * 0.12), int(y)), "t": first_at + i * gap})
