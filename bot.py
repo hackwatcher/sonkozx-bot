@@ -9,6 +9,7 @@
 Komutlar:
   python bot.py post [--dry-run|--dene] [--id N]     sıradaki karuseli (ve "yeni karusel" story'sini) yayınla
   python bot.py story [--dry-run|--dene] [--kind K]  günün story'sini yayınla
+  python bot.py reel [--dry-run|--dene] [--id N]     sıradaki fikri reels videosu olarak yayınla
     --dry-run  yalnızca çizer, Instagram'a bağlanmaz
     --dene     her şeyi yapar (yükleme, izin kontrolü, Instagram'ın işlemesi) ama YAYINLAMAZ, sırayı ilerletmez
   python bot.py baglanti                      token'ın hangi hesabı gördüğüne bak (yalnızca okur)
@@ -34,6 +35,7 @@ import time
 
 import requests
 
+from reels import render_reel
 from render import DEFAULT_PALETTE, HANDLE, render_carousel, render_story
 from validate import load_all
 
@@ -99,6 +101,17 @@ def build_caption(post):
     tags = next((t for topics, t in TOPIC_TAGS if topic in topics), DEFAULT_TOPIC_TAGS)
     hashtags = " ".join(dict.fromkeys(BASE_TAGS + tags))
     return f"{post['caption']}\n\nKaydet, yarın tekrar oku.\nTakip et: {HANDLE}\n\n{hashtags}"
+
+
+def build_reel_caption(post):
+    """Videoda yalnızca başlıklar var; açıklamalar burada, kaydetmeye değer bir not gibi."""
+    topic = post.get("topic", "")
+    tags = next((t for topics, t in TOPIC_TAGS if topic in topics), DEFAULT_TOPIC_TAGS)
+    hashtags = " ".join(dict.fromkeys(BASE_TAGS + tags))
+    plain = lambda t: t.replace("*", "")
+    tips = "\n\n".join(f"{i}. {plain(s['title'])} {plain(s['text'])}"
+                       for i, s in enumerate((s for s in post["slides"] if s.get("type") == "body"), 1))
+    return f"{post['caption']}\n\n{tips}\n\nKaydet, yarın tekrar izle.\nTakip et: {HANDLE}\n\n{hashtags}"
 
 
 # ---------- ortak Graph istemcisi ----------
@@ -185,6 +198,13 @@ class Graph:
                              children=",".join(children), caption=caption)["id"]
         self.wait(carousel)
         return self.publish(carousel) if publish else carousel
+
+    def publish_reel(self, path, caption, cover_ms, folder, publish=True):
+        url = self.urls([path], folder)[0]
+        cid = self.call("POST", f"{self.ig}/media", media_type="REELS", video_url=url, caption=caption,
+                        thumb_offset=str(cover_ms), share_to_feed="true")["id"]
+        self.wait(cid, timeout=600)
+        return self.publish(cid) if publish else cid
 
     def publish_story(self, path, folder, publish=True):
         url = self.urls([path], folder)[0]
@@ -281,6 +301,8 @@ class MetaSystem(Graph):
         return self._ig
 
     def urls(self, paths, folder):
+        if any(p.endswith(".mp4") for p in paths):  # reklam görsel kütüphanesi video almaz
+            return host_on_github(paths, folder)
         out = []
         for p in paths:  # yerel JPEG → reklam görsel kütüphanesi → herkese açık adres
             with open(p, "rb") as f:
@@ -378,6 +400,61 @@ def cmd_post(args):
                              "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
     if not args.id:
         state["next_id"] = post_id + 1
+    save_state(state)
+    return 0
+
+
+def reel_slot(when=None):
+    """Reels dilimi: 'YYYY-AA-GG-ogle' ya da '-aksam' (TR saati)."""
+    t = (when or dt.datetime.now(dt.timezone.utc)).astimezone(TR)
+    return f"{t:%Y-%m-%d}-{'ogle' if t.hour < 16 else 'aksam'}"
+
+
+def cmd_reel(args):
+    """Fikirler karuselden ayrı bir sırayla reels olarak da paylaşılır (state['reel_next'])."""
+    posts = {p["id"]: p for p in load_all()}
+    state = load_state()
+    reels = state.setdefault("reels", [])
+    post_id = args.id or state.get("reel_next", 1)
+    if args.zamanli and not args.dry_run and not args.dene:
+        hour = dt.datetime.now(TR).hour
+        if not (12 <= hour < 15 or 18 <= hour < 20):
+            print(f"Saat {hour}:xx reels penceresi dışında (12-15 / 18-20), gecikmiş tetikleme atlanıyor.")
+            return 0
+        slot = reel_slot()
+        if any(reel_slot(dt.datetime.fromisoformat(h["at"])) == slot for h in reels):
+            print(f"Bu dilimde ({slot}) zaten reels paylaşıldı, yedek tetikleme atlanıyor.")
+            return 0
+    if post_id not in posts:
+        print(f"Reels için fikir kalmadı (sıradaki id: {post_id}).")
+        return 0
+    post = posts[post_id]
+    caption = build_reel_caption(post)
+
+    if args.dry_run:
+        out, secs, _ = render_reel(post, os.path.join(ROOT, "preview", f"reel_{post_id:04d}.mp4"))
+        print(f"[deneme] #{post_id} reels çizildi ({secs:.1f} sn): {out}\n\n{caption}")
+        return 0
+
+    api = client()
+    tmp = tempfile.mkdtemp()
+    try:
+        path, secs, cover_ms = render_reel(post, os.path.join(tmp, f"reel_{post_id:04d}.mp4"))
+        print(f"Video hazır: {secs:.1f} sn, {os.path.getsize(path) / 1e6:.1f} MB")
+        if args.dene:
+            cid = api.publish_reel(path, caption, cover_ms, f"dene-reel-{post_id:04d}", publish=False)
+            print(f"[dene] #{post_id} reels Instagram'da hazır, YAYINLANMADI (kapsayıcı {cid})")
+            return 0
+        media_id = api.publish_reel(path, caption, cover_ms, f"reel-{post_id:04d}")
+        print(f"Reels yayınlandı: #{post_id} (media id {media_id})")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    reels.append({"id": post_id, "media_id": media_id,
+                  "at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
+    state["reels"] = reels[-60:]
+    if not args.id:
+        state["reel_next"] = post_id + 1
     save_state(state)
     return 0
 
@@ -490,11 +567,16 @@ def main():
     st.add_argument("--dene", action="store_true", help="her şeyi yap ama yayınlama")
     st.add_argument("--kind", choices=["gorev", "tokat", "ipucu", "aksam", "ozet"], help="türü zorla")
     st.add_argument("--zamanli", action="store_true", help="bugün paylaşıldıysa atla (yedek cron'lar için)")
+    r = sub.add_parser("reel")
+    r.add_argument("--dry-run", action="store_true", help="yayınlamadan sadece videoyu üret")
+    r.add_argument("--dene", action="store_true", help="her şeyi yap ama yayınlama")
+    r.add_argument("--id", type=int, help="belirli bir fikri yayınla (sıra ilerlemez)")
+    r.add_argument("--zamanli", action="store_true", help="bu dilimde paylaşıldıysa atla (yedek cron'lar için)")
     sub.add_parser("baglanti")
     sub.add_parser("refresh-token")
     sub.add_parser("status")
     args = parser.parse_args()
-    return {"post": cmd_post, "story": cmd_story, "baglanti": cmd_baglanti,
+    return {"post": cmd_post, "story": cmd_story, "reel": cmd_reel, "baglanti": cmd_baglanti,
             "refresh-token": cmd_refresh_token, "status": cmd_status}[args.cmd](args)
 
 
