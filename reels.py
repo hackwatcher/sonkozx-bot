@@ -223,13 +223,47 @@ def _whoosh(n, seed=0):
     return noise * env * 2.2
 
 
-def build_audio(scenes, total, path):
+MUSIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "music")
+
+
+def pick_track(pid):
+    """Parçalar karışık sırayla döner; art arda gelen reels'lerde aynı parça çıkmaz."""
+    tracks = sorted(glob.glob(os.path.join(MUSIC_DIR, "*.mp3")))
+    if not tracks:
+        return None
+    random.Random(2026).shuffle(tracks)
+    return tracks[pid % len(tracks)]
+
+
+def load_music(path, total):
+    """Parçanın video süresi kadar en enerjik bölümünü (stereo, -1..1) döndürür."""
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "f32le", "-ac", "2", "-ar", str(SR), "-"],
+                         capture_output=True, check=True).stdout
+    audio = np.frombuffer(raw, dtype=np.float32).reshape(-1, 2).astype(np.float64)
+    n = int(total * SR)
+    if len(audio) <= n:
+        audio = np.tile(audio, (n // len(audio) + 1, 1))
+        return audio[:n]
+    hop = SR // 4                                     # çeyrek saniyelik adımlarla en yüksek enerjili pencere
+    energy = np.sqrt((audio ** 2).mean(axis=1))
+    blocks = energy[:len(energy) // hop * hop].reshape(-1, hop).mean(axis=1)
+    win = max(1, n // hop)
+    sums = np.convolve(blocks, np.ones(win), mode="valid")
+    start = int(np.argmax(sums)) * hop
+    seg = audio[start:start + n]
+    rms = np.sqrt((seg ** 2).mean()) or 1.0
+    return seg * (0.22 / rms)                         # parçalar arası ses seviyesi eşit olsun
+
+
+def build_audio(scenes, total, path, music=None):
     n = int(total * SR) + SR
     out = np.zeros(n)
     t = np.arange(n) / SR
-    drone = 0.10 * np.sin(2 * np.pi * 55 * t) + 0.05 * np.sin(2 * np.pi * 82.4 * t)
-    out += drone * np.clip(t / 0.4, 0, 1)
+    if music is None:                                 # müzik yoksa alttan gelen uğultu
+        drone = 0.10 * np.sin(2 * np.pi * 55 * t) + 0.05 * np.sin(2 * np.pi * 82.4 * t)
+        out += drone * np.clip(t / 0.4, 0, 1)
     k = _kick(int(0.45 * SR))
+    kick_gain = 0.9 if music is None else 0.55        # müzikle birlikte vuruşlar daha kısık
     start = 0.0
     for si, sc in enumerate(scenes):
         if si:
@@ -238,12 +272,14 @@ def build_audio(scenes, total, path):
             out[a:a + len(w)] += w * 0.35
         for it in sc["items"]:
             a = int(max(0.0, start + it["t"] + SLAM / FPS * 0.6) * SR)
-            out[a:a + len(k)] += k[:n - a] * 0.9
+            out[a:a + len(k)] += k[:n - a] * kick_gain
         start += sc["dur"]
-    out = out[:int(total * SR)]
-    out *= np.clip((total - t[:len(out)]) / 0.3, 0, 1)   # sonda kısık bitiş
-    out = np.tanh(out * 1.4) * 0.85
-    pcm = (np.repeat(out[:, None], 2, axis=1) * 32767).astype(np.int16)
+    m = int(total * SR)
+    stereo = np.repeat(out[:m, None], 2, axis=1)
+    if music is not None:
+        stereo += music[:m] * np.clip(t[:m] / 0.05, 0, 1)[:, None]
+    stereo *= np.clip((total - t[:m]) / 0.3, 0, 1)[:, None]   # sonda kısık bitiş
+    pcm = (np.tanh(stereo * 1.4) * 0.85 * 32767).astype(np.int16)
     with wave.open(path, "wb") as wf:
         wf.setnchannels(2)
         wf.setsampwidth(2)
@@ -251,20 +287,20 @@ def build_audio(scenes, total, path):
         wf.writeframes(pcm.tobytes())
 
 
-def render_reel(post, out_path, palette=DEFAULT_PALETTE, music=None):
-    """music verilirse (telifsiz mp3/wav) sentez sesin altına kısık şekilde karışır."""
+def render_reel(post, out_path, palette=DEFAULT_PALETTE, music="auto"):
+    """music: 'auto' = music/ klasöründen sıradaki parça, bir dosya yolu ya da None (yalnızca efekt sesleri)."""
     pal = PALETTES[palette]
     scenes = build_scenes(post, pal)
     total = sum(s["dur"] for s in scenes)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    track = pick_track(post["id"]) if music == "auto" else music
     wav = os.path.join(tempfile.mkdtemp(), "ses.wav")
-    build_audio(scenes, total, wav)
+    build_audio(scenes, total, wav, load_music(track, total) if track else None)
+    if track:
+        print(f"Müzik: {os.path.basename(track)}")
     cmd = ["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
-           "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-i", wav]
-    if music:
-        cmd += ["-i", music, "-filter_complex",
-                "[2:a]volume=0.5[m];[1:a][m]amix=inputs=2:duration=first[a]", "-map", "0:v", "-map", "[a]"]
-    cmd += ["-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high",
+           "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-", "-i", wav,
+           "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high",
             "-crf", "18", "-preset", "medium", "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart", out_path]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
