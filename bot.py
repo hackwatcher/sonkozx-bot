@@ -301,7 +301,8 @@ class MetaSystem(Graph):
         return self._ig
 
     def urls(self, paths, folder):
-        if any(p.endswith(".mp4") for p in paths):  # reklam görsel kütüphanesi video almaz
+        # Varsayılan: Instagram yöntemiyle aynı media dalı. META_ADIMAGES=1 ise reklam kütüphanesi (video almaz).
+        if os.environ.get("META_ADIMAGES") != "1" or any(p.endswith(".mp4") for p in paths):
             return host_on_github(paths, folder)
         out = []
         for p in paths:  # yerel JPEG → reklam görsel kütüphanesi → herkese açık adres
@@ -315,9 +316,12 @@ class MetaSystem(Graph):
         lines = [f"Sayfa: {page} -> {'@' + ig['username'] if ig else '(bağlı Instagram yok)'}"
                  for page, ig in self.accounts()]
         b = self.call("GET", self.ig, fields="username,media_count,followers_count")
-        self.call("GET", AD_ACCOUNT, fields="name")
-        lines.append(f"Bağlı: @{b['username']} · {b.get('media_count', 0)} gönderi · {b.get('followers_count', 0)} "
-                     f"takipçi · reklam hesabı {AD_ACCOUNT} erişilebilir")
+        lines.append(f"Bağlı: @{b['username']} · {b.get('media_count', 0)} gönderi · {b.get('followers_count', 0)} takipçi")
+        if os.environ.get("META_ADIMAGES") == "1":
+            self.call("GET", AD_ACCOUNT, fields="name")
+            lines.append(f"Reklam hesabı {AD_ACCOUNT} erişilebilir")
+        else:
+            lines.append("Görseller: GitHub media dalı")
         return "\n".join(lines)
 
 
