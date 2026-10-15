@@ -58,11 +58,11 @@
     }
   ],
   "story": {
-    "tokat": 0,
+    "tokat": 1,
     "ipucu": 1,
     "gorev": 1
   },
-  "story_last": "2026-10-14",
+  "story_last": "2026-10-15",
   "reels": [
     {
       "id": 1,
